@@ -22,8 +22,11 @@ body{background:#f5f0e8;font-family:Georgia,serif;color:#2d2a24}
 .filter-btn{padding:6px 14px;border-radius:20px;border:1px solid #c8d8a8;background:#fff;color:#5a7a3a;font-size:13px;cursor:pointer;white-space:nowrap}
 .filter-btn.active{background:#2d4a1e;color:#e8f0d8;border-color:#2d4a1e}
 .cards{display:flex;flex-direction:column;gap:10px}
-.card{background:#fff;border-radius:14px;padding:14px 16px;display:flex;align-items:center;gap:14px;cursor:pointer;border:1.5px solid transparent}
+.card{background:#fff;border-radius:14px;overflow:hidden;cursor:pointer;border:1.5px solid transparent}
 .card.sel{border-color:#8aaa68}
+.card-photo{width:100%;height:160px;object-fit:cover;display:block}
+.card-photo-placeholder{width:100%;height:100px;background:#f0f8e8;display:flex;align-items:center;justify-content:center;font-size:32px}
+.card-body{padding:12px 16px}
 .card-name{font-size:16px;margin-bottom:4px}
 .card-loc{font-size:12px;color:#8aaa68;margin-bottom:2px}
 .card-date{font-size:12px;color:#aab890}
@@ -31,7 +34,11 @@ body{background:#f5f0e8;font-family:Georgia,serif;color:#2d2a24}
 .tag{background:#f0f8e8;border:1px solid #c8d8a8;border-radius:8px;padding:4px 10px;font-size:12px;color:#5a7a3a}
 .del-btn{background:#fdf0f0;border:1px solid #e8c8c8;border-radius:8px;padding:4px 10px;font-size:12px;color:#c85a5a;cursor:pointer}
 .empty{text-align:center;padding:50px 20px;color:#aab890}
-.saved{position:fixed;bottom:20px;right:20px;background:#2d4a1e;color:#e8f0d8;padding:10px 16px;border-radius:10px;font-size:13px;opacity:0;transition:opacity .3s}
+.saved{position:fixed;bottom:20px;right:20px;background:#2d4a1e;color:#e8f0d8;padding:10px 16px;border-radius:10px;font-size:13px;opacity:0;transition:opacity .3s;z-index:99}
+.photo-btn{width:100%;padding:12px;border:2px dashed #c8d8a8;border-radius:10px;background:#f9fdf5;color:#5a7a3a;font-size:14px;cursor:pointer;margin-bottom:10px;font-family:Georgia,serif}
+.photo-preview{width:100%;height:140px;object-fit:cover;border-radius:10px;margin-bottom:10px;display:none}
+.gps-btn{width:100%;padding:10px;border:1px solid #d4e8b8;border-radius:8px;background:#f0f8e8;color:#2d4a1e;font-size:13px;cursor:pointer;margin-bottom:10px;font-family:Georgia,serif}
+.gps-status{font-size:12px;color:#8aaa68;margin-bottom:10px;min-height:16px}
 </style>
 </head>
 <body>
@@ -47,8 +54,14 @@ body{background:#f5f0e8;font-family:Georgia,serif;color:#2d2a24}
     <button class="add-btn" id="addBtn" onclick="toggleForm()">+</button>
   </div>
 </div>
+
 <div class="wrap">
   <div class="form-box" id="form">
+    <button class="photo-btn" onclick="document.getElementById('photoInput').click()">📷 Fotoğraf Çek veya Seç</button>
+    <input type="file" id="photoInput" accept="image/*" capture="environment" style="display:none" onchange="handlePhoto(this)">
+    <img id="photoPreview" class="photo-preview">
+    <button class="gps-btn" onclick="getGPS()">📍 Konumu Otomatik Al</button>
+    <div class="gps-status" id="gpsStatus"></div>
     <label class="form-label">YAPRAK ADI</label>
     <input class="form-input" id="fName" placeholder="örn. Meşe Yaprağı">
     <label class="form-label">BULUNDUĞU YER</label>
@@ -70,13 +83,59 @@ body{background:#f5f0e8;font-family:Georgia,serif;color:#2d2a24}
   <div class="filters" id="filters"></div>
   <div class="cards" id="cards"></div>
 </div>
+
 <div class="saved" id="saved">✓ Kaydedildi</div>
+<canvas id="canvas" style="display:none"></canvas>
+
 <script>
 var leaves=JSON.parse(localStorage.getItem("yapraklar")||"[]");
-var filter="Tümü",selected=null,showForm=false;
-function save(){localStorage.setItem("yapraklar",JSON.stringify(leaves));var el=document.getElementById("saved");el.style.opacity="1";setTimeout(function(){el.style.opacity="0";},1500);}
-function svg(c,s){s=s||56;return'<svg width="'+s+'" height="'+s+'" viewBox="0 0 100 100" style="flex-shrink:0"><path d="M50,8 C65,5 82,18 82,38 C88,42 88,58 78,62 C74,74 63,82 50,82 C37,82 26,74 22,62 C12,58 12,42 18,38 C18,18 35,5 50,8Z" fill="'+c+'" opacity=".85"/><path d="M50,80 Q52,55 54,30" stroke="#2d4a1e" stroke-width="1.5" fill="none" opacity=".4"/></svg>';}
+var filter="Tümü",selected=null,showForm=false,currentPhoto=null;
+
+function save(){
+  try{localStorage.setItem("yapraklar",JSON.stringify(leaves));}catch(e){alert("Depolama doldu. Bazı fotoğrafları silmeyi dene.");}
+  var el=document.getElementById("saved");el.style.opacity="1";
+  setTimeout(function(){el.style.opacity="0";},1500);
+}
+
+function handlePhoto(input){
+  var file=input.files[0];if(!file)return;
+  var reader=new FileReader();
+  reader.onload=function(e){
+    var img=new Image();
+    img.onload=function(){
+      var canvas=document.getElementById("canvas");
+      var max=600;
+      var w=img.width,h=img.height;
+      if(w>max){h=h*(max/w);w=max;}
+      if(h>max){w=w*(max/h);h=max;}
+      canvas.width=w;canvas.height=h;
+      canvas.getContext("2d").drawImage(img,0,0,w,h);
+      currentPhoto=canvas.toDataURL("image/jpeg",0.7);
+      var prev=document.getElementById("photoPreview");
+      prev.src=currentPhoto;prev.style.display="block";
+    };
+    img.src=e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+function getGPS(){
+  var status=document.getElementById("gpsStatus");
+  status.textContent="📡 Konum alınıyor...";
+  if(!navigator.geolocation){status.textContent="Tarayıcın konum desteklemiyor.";return;}
+  navigator.geolocation.getCurrentPosition(
+    function(pos){
+      var lat=pos.coords.latitude.toFixed(5);
+      var lon=pos.coords.longitude.toFixed(5);
+      document.getElementById("fLoc").value=lat+", "+lon;
+      status.textContent="✓ Konum alındı: "+lat+", "+lon;
+    },
+    function(){status.textContent="Konum alınamadı. Lütfen izin ver.";}
+  );
+}
+
 function fmt(d){var m=["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"],p=d.split("-");return p[2]+" "+m[+p[1]-1]+" "+p[0];}
+
 function render(){
   document.getElementById("count").textContent=leaves.length+" KAYIT";
   var types=["Tümü"];
@@ -84,16 +143,26 @@ function render(){
   document.getElementById("filters").innerHTML=types.map(function(t){return'<button class="filter-btn'+(filter===t?' active':'')+'" onclick="setFilter(\''+t+'\')">'+t+'</button>';}).join("");
   var f=leaves.filter(function(l){return filter==="Tümü"||l.type===filter;});
   if(!f.length){document.getElementById("cards").innerHTML='<div class="empty"><p>Henüz yaprak yok.</p><p style="font-size:13px;margin-top:8px">+ butonuna bas ve ilk yaprağını ekle.</p></div>';return;}
-  document.getElementById("cards").innerHTML=f.map(function(l){var s=selected===l.id;return'<div class="card'+(s?' sel':'')+'" onclick="sel('+l.id+')">'+svg(l.color)+'<div style="flex:1"><div class="card-name">'+l.name+'</div><div class="card-loc">📍 '+l.location+'</div><div class="card-date">🗓 '+fmt(l.date)+'</div>'+(s?'<div class="card-actions"><span class="tag">'+l.type+'</span><button class="del-btn" onclick="del(event,'+l.id+')">Sil</button></div>':'')+' </div></div>';}).join("");
+  document.getElementById("cards").innerHTML=f.map(function(l){
+    var s=selected===l.id;
+    var photo=l.photo?'<img class="card-photo" src="'+l.photo+'">':"";
+    return'<div class="card'+(s?' sel':'')+'" onclick="sel('+l.id+')">'+photo+'<div class="card-body"><div class="card-name">'+l.name+'</div><div class="card-loc">📍 '+l.location+'</div><div class="card-date">🗓 '+fmt(l.date)+'</div>'+(s?'<div class="card-actions"><span class="tag">'+l.type+'</span><button class="del-btn" onclick="del(event,'+l.id+')">Sil</button></div>':'')+' </div></div>';
+  }).join("");
 }
-function toggleForm(){showForm=!showForm;document.getElementById("form").style.display=showForm?"block":"none";document.getElementById("addBtn").textContent=showForm?"✕":"+";}
+
+function toggleForm(){
+  showForm=!showForm;
+  document.getElementById("form").style.display=showForm?"block":"none";
+  document.getElementById("addBtn").textContent=showForm?"✕":"+";
+  if(!showForm){currentPhoto=null;document.getElementById("photoPreview").style.display="none";document.getElementById("gpsStatus").textContent="";}
+}
 function setFilter(t){filter=t;selected=null;render();}
 function sel(id){selected=selected===id?null:id;render();}
 function del(e,id){e.stopPropagation();leaves=leaves.filter(function(l){return l.id!==id;});selected=null;save();render();}
 function addLeaf(){
   var n=document.getElementById("fName").value.trim(),l=document.getElementById("fLoc").value.trim(),d=document.getElementById("fDate").value,t=document.getElementById("fType").value.trim()||"Diğer",c=document.getElementById("fColor").value;
   if(!n||!l||!d){alert("Ad, yer ve tarih zorunlu.");return;}
-  leaves.push({id:Date.now(),name:n,location:l,date:d,type:t,color:c});
+  leaves.push({id:Date.now(),name:n,location:l,date:d,type:t,color:c,photo:currentPhoto});
   document.getElementById("fName").value=document.getElementById("fLoc").value=document.getElementById("fDate").value=document.getElementById("fType").value="";
   toggleForm();save();render();
 }
